@@ -1,8 +1,11 @@
 import os
 import pickle
+import logging
 import requests
 from simplejson import JSONDecodeError
 from . import WIKIDATA_URL
+
+logger = logging.getLogger(__name__)
 
 
 def get_wikidata_label(wikidata_id, session=None, language='en'):

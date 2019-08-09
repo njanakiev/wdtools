@@ -1,7 +1,10 @@
 import requests
+import logging
 import pandas as pd
-from . import WIKIDATA_URL, WIKIDATA_SPARQL_URL
 from simplejson import JSONDecodeError
+from . import WIKIDATA_URL, WIKIDATA_SPARQL_URL
+
+logger = logging.getLogger(__name__)
 
 
 def wikidata_query(sparql_query, headers=None, session=None):
