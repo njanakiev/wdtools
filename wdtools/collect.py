@@ -1,8 +1,8 @@
 import os
+import re
 import pickle
 import logging
 import requests
-import numpy as np
 import pandas as pd
 from . import query, labels
 
@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 def split_bbox(bbox, n=1, buffer_pct=0.01):
-    t = np.linspace(0, 1, n + 1)
+    t = [v / n for v in range(n + 1)]
     buffer = buffer_pct * (bbox[2] - bbox[0]) / n
     for i in range(n):
         for j in range(n):
             x0 = bbox[0] + t[i] * (bbox[2] - bbox[0]) - buffer
-            y0 = bbox[1] + t[i] * (bbox[3] - bbox[1]) - buffer
+            y0 = bbox[1] + t[j] * (bbox[3] - bbox[1]) - buffer
             x1 = bbox[0] + t[i + 1] * (bbox[2] - bbox[0]) + buffer
-            y1 = bbox[1] + t[i + 1] * (bbox[3] - bbox[1]) + buffer
+            y1 = bbox[1] + t[j + 1] * (bbox[3] - bbox[1]) + buffer
             yield [x0, y0, x1, y1]
 
 
@@ -57,7 +57,7 @@ def wikidata_bbox(bbox):
 
 
 def wikidata_bbox_to_file(bbox, filepath, n_splits,
-    labels_filepath, compression='infer'):
+    labels_filepath, compression='infer', language='en'):
     with labels.WikidataLabelDictionary(
         labels_filepath, language) as wikidata_labels:
 
@@ -68,14 +68,18 @@ def wikidata_bbox_to_file(bbox, filepath, n_splits,
 
             # Add instance_of label
             df['instance_of'] = df['instance_of_id'].apply(
-                lambda idx: wikidata_labels[idx])
+                lambda idx: wikidata_labels[idx]
+                    if isinstance(idx, str) and re.match(r'Q[0-9]+$', idx)
+                    else None)
 
             if i == 0:
                 df.to_csv(filepath, compression=compression,
-                    mode='a', index=False)
+                    index=False)
             else:
                 df.to_csv(filepath, compression=compression,
-                    mode='a', index=False, header=False)
+                    index=False, mode='a', header=False)
+
+            wikidata_labels.save()
 
 
 def wikidata_items(df, folderpath, language='en', overwrite=False):
