@@ -56,7 +56,8 @@ def wikidata_bbox(bbox):
     return df
 
 
-def wikidata_bbox_to_file(bbox, filepath, n_splits, compression='infer'):
+def wikidata_bbox_to_file(bbox, filepath, n_splits,
+    labels_filepath, compression='infer'):
     with labels.WikidataLabelDictionary(
         labels_filepath, language) as wikidata_labels:
 
@@ -75,3 +76,44 @@ def wikidata_bbox_to_file(bbox, filepath, n_splits, compression='infer'):
             else:
                 df.to_csv(filepath, compression=compression,
                     mode='a', index=False, header=False)
+
+
+def wikidata_items(df, folderpath, language='en', overwrite=False):
+    logger.debug('collect_wikidata_items started')
+    session = requests.Session()
+
+    start_time = time.time()
+    if isinstance(df, pd.io.parsers.TextFileReader):
+        iterator = enumerate(df)
+    else:
+        iterator = df.iterrows()
+
+    for i, chunk in iterator:
+        wikidata_ids = chunk['wikidata_id']
+        logger.debug("Chunk %d", i)
+        if isinstance(wikidata_ids, pd.core.series.Series):
+            if wikidata_ids.apply(lambda entity_id: os.path.exists(
+                os.path.join(folderpath, entity_id))).all():
+                continue
+        else:
+            filepath = os.path.join(folderpath, wikidata_ids)
+            if os.path.exists(filepath):
+                continue
+
+        data = query.get_wikidata_entity(
+            wikidata_ids, session, language)
+
+        if data is None:
+            continue
+
+        for entity_id in data['entities']:
+            filepath = os.path.join(folderpath, entity_id)
+            entity = data['entities'].get(entity_id)
+            if not os.path.exists(filepath) or overwrite:
+                if entity is not None:
+                    with open(filepath, 'wb') as f:
+                        pickle.dump(entity, f)
+                        logger.debug("Content of Wikidata id: %s saved in %s",
+                                      entity_id, filepath)
+
+    logger.debug('Total duration: %f', time.time() - start_time)
