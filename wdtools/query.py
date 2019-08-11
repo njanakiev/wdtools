@@ -1,3 +1,4 @@
+import time
 import requests
 import logging
 import pandas as pd
@@ -7,14 +8,31 @@ from . import WIKIDATA_URL, WIKIDATA_SPARQL_URL
 logger = logging.getLogger(__name__)
 
 
-def wikidata_query(sparql_query, headers=None, session=None):
+def wikidata_query(sparql_query, headers=None, session=None, num_retries=100):
     session = session if session else requests.Session()
+    data = {}
     try:
-        params = { 'format': 'json', 'query': sparql_query }
-        r = session.get(WIKIDATA_SPARQL_URL, params=params, headers=headers)
-        data = r.json()
-    except JSONDecodeError as e:
-        print(r.content)
+        for retry in range(num_retries):
+            params = { 'format': 'json', 'query': sparql_query }
+            r = session.get(WIKIDATA_SPARQL_URL,
+                params=params, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                break
+            elif r.status_code == 429:
+                logger.warn('429 Too Many Requests for SPARQL query: %s',
+                    sparql_query)
+                time.sleep(1)
+            elif r.status_code == 503:
+                logger.warn('503 Service Unavailable for SPARQL query: %s',
+                    sparql_query)
+                time.sleep(1)
+            else:
+                raise Exception("Response code %d" % r.status_code)
+
+    except (requests.exceptions.RequestException, UnicodeError,
+        JSONDecodeError) as e:
+        logger.error("Error: %s for SPARQL query: %s", e, sparql_query)
         raise Exception('Invalid query')
 
     if ('results' in data) and ('bindings' in data['results']):
