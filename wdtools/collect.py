@@ -4,7 +4,7 @@ import pickle
 import logging
 import requests
 import pandas as pd
-from . import query, labels
+import wdtools
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def instanceof_wikidata_ids(instanceof,
     filepath, overwrite=False, chunksize=None):
 
     if not os.path.exists(filepath) or overwrite:
-        df = query.wikidata_query("""
+        df = wdtools.query.wikidata_query("""
             SELECT ?wikidata_id WHERE {{
                 ?wikidata_id wdt:P31/wdt:P279* wd:{}.
             }}""".format(instanceof))
@@ -36,40 +36,64 @@ def instanceof_wikidata_ids(instanceof,
     return pd.read_csv(filepath, names=['wikidata_id'], chunksize=chunksize)
 
 
-def wikidata_bbox(bbox):
-    df = query.wikidata_query("""
-        SELECT ?wikidata_id ?instance_of_id ?geom
-        WHERE {{
-          ?wikidata_id wdt:P31 ?instance_of_id.
-          SERVICE wikibase:box {{
-            ?wikidata_id wdt:P625 ?geom .
-            bd:serviceParam wikibase:cornerWest
-              "Point({} {})"^^geo:wktLiteral.
-            bd:serviceParam wikibase:cornerEast
-              "Point({} {})"^^geo:wktLiteral.
-          }}
-        }}""".format(*bbox))
+def wikidata_bbox(bbox, prop=None, prop_id=None):
+    if prop is None:
+        prop = 'property'
+        query = f"""
+            SELECT ?wikidata_id ?property_id ?geom
+            WHERE {{
+              ?wikidata_id ?p ?statement.
+              ?property_id wikibase:claim ?p.
+              SERVICE wikibase:box {{
+                ?wikidata_id wdt:P625 ?geom .
+                bd:serviceParam wikibase:cornerWest
+                  "Point({bbox[0]} {bbox[1]})"^^geo:wktLiteral.
+                bd:serviceParam wikibase:cornerEast
+                  "Point({bbox[2]} {bbox[3]})"^^geo:wktLiteral.
+              }}
+            }}"""
+    else:
+        query = f"""
+            SELECT ?wikidata_id ?{prop}_id ?geom
+            WHERE {{
+              ?wikidata_id wdt:{prop_id} ?{prop}_id.
+              SERVICE wikibase:box {{
+                ?wikidata_id wdt:P625 ?geom .
+                bd:serviceParam wikibase:cornerWest
+                  "Point({bbox[0]} {bbox[1]})"^^geo:wktLiteral.
+                bd:serviceParam wikibase:cornerEast
+                  "Point({bbox[2]} {bbox[3]})"^^geo:wktLiteral.
+              }}
+            }}"""
+
+    df = wdtools.query.wikidata_query(query).drop_duplicates()
+    logger.debug("Table shape: %s", str(df.shape))
+
     df['wikidata_id'] = df['wikidata_id'].str.split(
         "http://www.wikidata.org/entity/").str[1]
-    df['instance_of_id'] = df['instance_of_id'].str.split(
+    df[prop + '_id'] = df[prop + '_id'].str.split(
         "http://www.wikidata.org/entity/").str[1]
     return df
 
 
 def wikidata_bbox_to_file(bbox, filepath, n_splits,
-    labels_filepath, compression='infer', language='en'):
-    with labels.WikidataLabelDictionary(
+    labels_filepath, prop=None, prop_id=None,
+    compression='infer', language='en'):
+
+    property_name = prop if prop else "property"
+
+    with wdtools.labels.WikidataLabelDictionary(
         labels_filepath, language) as wikidata_labels:
 
         for i, bbox_subset in enumerate(split_bbox(bbox, n_splits, 0.0)):
-            logger.debug("Bounding box index %d / %d",
-                i + 1, n_splits * n_splits)
-            df = wikidata_bbox(bbox_subset)
+            logger.debug("Bounding box index %d / %d, bbox: %s",
+                i + 1, n_splits * n_splits, str(bbox_subset))
+            df = wikidata_bbox(bbox_subset, prop, prop_id)
 
             # Add instance_of label
-            df['instance_of'] = df['instance_of_id'].apply(
+            df[property_name] = df[property_name + '_id'].apply(
                 lambda idx: wikidata_labels[idx]
-                    if isinstance(idx, str) and re.match(r'Q[0-9]+$', idx)
+                    if isinstance(idx, str) and re.match(r'[QP][0-9]+$', idx)
                     else None)
 
             if i == 0:
@@ -104,7 +128,7 @@ def wikidata_items(df, folderpath, language='en', overwrite=False):
             if os.path.exists(filepath):
                 continue
 
-        data = query.get_wikidata_entity(
+        data = wdtools.query.get_wikidata_entity(
             wikidata_ids, session, language)
 
         if data is None:
