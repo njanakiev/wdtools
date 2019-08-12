@@ -36,8 +36,8 @@ def instanceof_wikidata_ids(instanceof,
     return pd.read_csv(filepath, names=['wikidata_id'], chunksize=chunksize)
 
 
-def wikidata_bbox(bbox, prop=None, prop_id=None):
-    if prop is None:
+def wikidata_bbox(bbox, prop_id=None, prop=None):
+    if prop_id is None and prop is None:
         prop = 'property'
         query = f"""
             SELECT ?wikidata_id ?property_id ?geom
@@ -69,41 +69,49 @@ def wikidata_bbox(bbox, prop=None, prop_id=None):
     df = wdtools.query.wikidata_query(query).drop_duplicates()
     logger.debug("Table shape: %s", str(df.shape))
 
+    url_prefix = "http://www.wikidata.org/entity/"
     df['wikidata_id'] = df['wikidata_id'].str.split(
         "http://www.wikidata.org/entity/").str[1]
-    df[prop + '_id'] = df[prop + '_id'].str.split(
-        "http://www.wikidata.org/entity/").str[1]
+    df[prop + '_id'] = df[prop + '_id'].apply(lambda s:
+        s.split(url_prefix)[1] if url_prefix in s else s)
+
     return df
 
 
 def wikidata_bbox_to_file(bbox, filepath, n_splits,
-    labels_filepath, prop=None, prop_id=None,
+    labels_filepath=None, prop_id=None, prop=None,
     compression='infer', language='en'):
 
-    property_name = prop if prop else "property"
+    if labels_filepath:
+        property_name = prop if prop else "property"
 
-    with wdtools.labels.WikidataLabelDictionary(
-        labels_filepath, language) as wikidata_labels:
+        with wdtools.labels.WikidataLabelDictionary(
+            labels_filepath, language) as wikidata_labels:
 
+            for i, bbox_subset in enumerate(split_bbox(bbox, n_splits, 0.0)):
+                logger.debug("Bounding box index %d / %d, bbox: %s",
+                    i + 1, n_splits * n_splits, str(bbox_subset))
+                df = wikidata_bbox(bbox_subset, prop_id, prop)
+
+                # Add instance_of label
+                df[property_name] = df[property_name + '_id'].apply(
+                    lambda idx: wikidata_labels[idx]
+                        if re.match(r'[QP][0-9]+$', idx) else None)
+
+                mode, header = 'w' if i == 0 else 'a', i == 0
+                df.to_csv(filepath, compression=compression,
+                    index=False, mode=mode, header=header)
+
+                wikidata_labels.save()
+    else:
         for i, bbox_subset in enumerate(split_bbox(bbox, n_splits, 0.0)):
             logger.debug("Bounding box index %d / %d, bbox: %s",
                 i + 1, n_splits * n_splits, str(bbox_subset))
-            df = wikidata_bbox(bbox_subset, prop, prop_id)
+            df = wikidata_bbox(bbox_subset, prop_id, prop)
 
-            # Add instance_of label
-            df[property_name] = df[property_name + '_id'].apply(
-                lambda idx: wikidata_labels[idx]
-                    if isinstance(idx, str) and re.match(r'[QP][0-9]+$', idx)
-                    else None)
-
-            if i == 0:
-                df.to_csv(filepath, compression=compression,
-                    index=False)
-            else:
-                df.to_csv(filepath, compression=compression,
-                    index=False, mode='a', header=False)
-
-            wikidata_labels.save()
+            mode, header = 'w' if i == 0 else 'a', i == 0
+            df.to_csv(filepath, compression=compression,
+                index=False, mode=mode, header=header)
 
 
 def wikidata_items(df, folderpath, language='en', overwrite=False):
