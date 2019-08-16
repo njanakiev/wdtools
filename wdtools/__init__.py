@@ -6,3 +6,4 @@ WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 from . import labels
 from . import collect
 from . import query
+from . import utils
