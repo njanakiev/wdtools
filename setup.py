@@ -20,10 +20,6 @@ setup(
     packages=["wdtools"],
     install_requires=["requests",
                       "pandas",
-                      "geopandas",
-                      "shapely",
-                      "sqlalchemy",
-                      "geoalchemy2",
                       "simplejson"],
     platforms="any",
     include_package_data=True
